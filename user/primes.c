@@ -4,6 +4,7 @@
 void primes(int* buf) {
   int first = 1, firstPrime = 1;
   int prime, num, p[2];
+  close(buf[1]);
   while (read(buf[0], &num, 4) > 0) {
     if (first) {
       prime = num;
@@ -16,13 +17,12 @@ void primes(int* buf) {
         if (fork() == 0) {
           primes(p);
         }
+        close(p[0]);
       }
       write(p[1], &num, 4);
     }
   }
   close(buf[0]);
-  close(buf[1]);
-  close(p[0]);
   close(p[1]);
   wait(0);
   exit(0);
@@ -37,11 +37,11 @@ main(int argc, char *argv[])
   if (fork() == 0) {
     primes(p);
   } else {
+    close(p[0]);
     for (int i = 2; i < 36; i++) {
       write(p[1], &i, 4);
     }
   }
-  close(p[0]);
   close(p[1]);
   wait(0);
 
