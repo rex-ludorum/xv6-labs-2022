@@ -5,7 +5,7 @@
 int
 main(int argc, char *argv[])
 {
-  char buf[512], tmp;
+  char buf[512];
   char *p, *oldP, *pAhead, *pEnd;
 
   char* newArgv[MAXARG];
@@ -16,40 +16,35 @@ main(int argc, char *argv[])
   }
   i--;
 
-  int k = 0;
-  while (read(0, &tmp, 512) > 0) {
-    buf[k++] = tmp;
+  int k = 0, tmp = 0;
+  while ((tmp = read(0, buf + k, 512)) > 0) {
+    k += tmp;
   }
 
   for (pEnd = buf; *pEnd != '\0'; pEnd++) ;
 
   pAhead = buf;
-  oldP = buf;
   p = buf;
-  int shouldExec;
 
   while (pAhead < pEnd) {
-    shouldExec = 0;
     j = i;
-    for (; *pAhead != '\n'; pAhead++) {
-      if (pAhead > pEnd) exit(0);
+    for (; *pAhead == '\n' || *pAhead == ' '; pAhead++) ;
+    
+    for (; *pAhead != '\n' && *pAhead != ' '; pAhead++) {
+      if (pAhead >= pEnd) exit(0);
     }
     while (p < pAhead) {
+      for (; *p == ' ' || *p == '\n'; p++) ;
+      oldP = p;
       for (; *p != ' ' && *p != '\n'; p++) ;
       newArgv[j++] = oldP;
-      if (*p == '\n') {
-        shouldExec = 1;
-      }
       *p++ = '\0';
-      oldP = p;
     }
-    if (shouldExec) {
-      newArgv[j] = 0;
-      if (fork() == 0) {
-        exec(newArgv[0], newArgv);
-      } else {
-        wait(0);
-      }
+    newArgv[j] = 0;
+    if (fork() == 0) {
+      exec(newArgv[0], newArgv);
+    } else {
+      wait(0);
     }
   }
 
