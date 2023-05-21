@@ -80,3 +80,13 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+uint64 getfree(void) {
+  uint64 nfree = 0;
+  struct run* r = kmem.freelist;
+  while (r) {
+    nfree++;
+    r = r->next;
+  }
+  return nfree << 12;
+}

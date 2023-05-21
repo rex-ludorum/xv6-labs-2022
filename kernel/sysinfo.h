@@ -1,4 +1,4 @@
 struct sysinfo {
-  uint64 freemem;   // amount of free memory (bytes)
-  uint64 nproc;     // number of process
+  uint64 freemem; // Number of bytes of free memory
+  short nproc;    // Number of processes whose state is not UNUSED
 };
