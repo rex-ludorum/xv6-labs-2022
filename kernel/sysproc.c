@@ -109,6 +109,6 @@ uint64 sys_sigreturn(void) {
   *myproc()->trapframe = *myproc()->tfbackup;
   kfree(myproc()->tfbackup);
   myproc()->entrant = 0;
-  usertrapret();
-  return 0;
+  //usertrapret();
+  return myproc()->trapframe->a0;
 }
