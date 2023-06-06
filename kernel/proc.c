@@ -127,15 +127,20 @@ found:
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+    // printf("freeproc 1\n");
     freeproc(p);
+    // printf("freeproc 1 success\n");
     release(&p->lock);
     return 0;
   }
+  refcounts[(uint64) p->trapframe / PGSIZE]++;
 
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
+    // printf("freeproc 2\n");
     freeproc(p);
+    // printf("freeproc 2 success\n");
     release(&p->lock);
     return 0;
   }
@@ -155,8 +160,10 @@ found:
 static void
 freeproc(struct proc *p)
 {
-  if(p->trapframe)
+  if(p->trapframe) {
+    refcounts[(uint64) p->trapframe / PGSIZE]--;
     kfree((void*)p->trapframe);
+  }
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
@@ -197,6 +204,7 @@ proc_pagetable(struct proc *p)
   // trampoline.S.
   if(mappages(pagetable, TRAPFRAME, PGSIZE,
               (uint64)(p->trapframe), PTE_R | PTE_W) < 0){
+    // printf("unmapping trampoline\n");
     uvmunmap(pagetable, TRAMPOLINE, 1, 0);
     uvmfree(pagetable, 0);
     return 0;
@@ -210,9 +218,13 @@ proc_pagetable(struct proc *p)
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
+  // printf("unmapping trampoline\n");
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+  // printf("unmapping trapframe\n");
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  // printf("uvmfreeing\n");
   uvmfree(pagetable, sz);
+  // printf("uvmfreeing success\n");
 }
 
 // a user program that calls exec("/init")
@@ -290,11 +302,14 @@ fork(void)
 
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    // printf("freeproc 3\n");
     freeproc(np);
+    // printf("freeproc 3 success\n");
     release(&np->lock);
     return -1;
   }
   np->sz = p->sz;
+  printf("new proc size %d\n", np->sz);
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -414,7 +429,9 @@ wait(uint64 addr)
             release(&wait_lock);
             return -1;
           }
+          // printf("freeproc 4\n");
           freeproc(pp);
+          // printf("freeproc 4 success\n");
           release(&pp->lock);
           release(&wait_lock);
           return pid;

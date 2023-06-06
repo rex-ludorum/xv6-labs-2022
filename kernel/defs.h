@@ -1,3 +1,5 @@
+#include "memlayout.h"
+
 struct buf;
 struct context;
 struct file;
@@ -63,6 +65,7 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
+extern uint     refcounts[PHYSTOP / PGSIZE];
 
 // log.c
 void            initlog(int, struct superblock*);

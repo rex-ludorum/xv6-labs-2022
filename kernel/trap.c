@@ -65,6 +65,40 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if (r_scause() == 15) {
+    pte_t *addr;
+    if ((addr = walk(p->pagetable, r_stval(), 0)) != 0) {
+      // printf("r_stval %p\n", r_stval());
+      // printf("refs %d\n", refcounts[PTE2PA(*addr) / PGSIZE]);
+      if ((*addr & PTE_C) == 0) {
+        setkilled(p);
+	// printf("non cow page\n");
+      } else if (refcounts[PTE2PA(*addr) / PGSIZE] > 1) {
+	// printf("cow page fault\n");
+        char *newmem = kalloc();
+	if (newmem == 0) {
+          setkilled(p);
+	  // printf("killed\n");
+	} else {
+          memmove(newmem, (void*) PTE2PA(*addr), PGSIZE);
+          refcounts[PTE2PA(*addr) / PGSIZE]--;
+          refcounts[(uint64) newmem / PGSIZE]++;
+          uint flags = PTE_FLAGS(*addr);
+          // printf("PTE_C %d\n", flags & PTE_C);
+          *addr = PA2PTE(newmem) | flags | PTE_W;
+        }
+	/*
+        uint64 nextva, va = 0;
+        while ((nextva = walkaddr(p->pagetable, va)) != 0)
+          va += PGSIZE;
+	 */
+        // mappages(p->pagetable, nextva, 1, (uint64)newmem, flags);
+        // uvmunmap(p->pagetable, r_stval(), 1, 0);
+      } else {
+	// printf("no copy needed\n");
+        *addr |= PTE_W;
+      }
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
