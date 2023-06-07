@@ -67,7 +67,8 @@ usertrap(void)
     syscall();
   } else if (r_scause() == 15) {
     pte_t *addr;
-    if ((addr = walk(p->pagetable, r_stval(), 0)) != 0) {
+    if (r_stval() >= MAXVA) setkilled(p);
+    else if ((addr = walk(p->pagetable, r_stval(), 0)) != 0) {
       // printf("r_stval %p\n", r_stval());
       // printf("refs %d\n", refcounts[PTE2PA(*addr) / PGSIZE]);
       if ((*addr & PTE_C) == 0) {
@@ -75,14 +76,15 @@ usertrap(void)
 	// printf("non cow page\n");
       } else if (refcounts[PTE2PA(*addr) / PGSIZE] > 1) {
 	// printf("cow page fault\n");
-        char *newmem = kalloc();
+        char *newmem = pagekalloc();
 	if (newmem == 0) {
           setkilled(p);
 	  // printf("killed\n");
 	} else {
           memmove(newmem, (void*) PTE2PA(*addr), PGSIZE);
-          refcounts[PTE2PA(*addr) / PGSIZE]--;
-          refcounts[(uint64) newmem / PGSIZE]++;
+          // refcounts[PTE2PA(*addr) / PGSIZE]--;
+	  decrefcount((void *) PTE2PA(*addr));
+          // refcounts[(uint64) newmem / PGSIZE]++;
           uint flags = PTE_FLAGS(*addr);
           // printf("PTE_C %d\n", flags & PTE_C);
           *addr = PA2PTE(newmem) | flags | PTE_W;

@@ -64,6 +64,10 @@ void            ramdiskrw(struct buf*);
 // kalloc.c
 void*           kalloc(void);
 void            kfree(void *);
+void*           pagekalloc(void);
+void            decrefcount(void *);
+void            increfcount(void *);
+void            pagekfree(void *);
 void            kinit(void);
 extern uint     refcounts[PHYSTOP / PGSIZE];
 
