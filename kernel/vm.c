@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "kalloc.h"
 
 /*
  * the kernel's page table.
@@ -178,7 +180,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    // printf("address free %p\n", a);
+    // printf("unmap address %p\n", a);
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
@@ -186,6 +188,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     uint64 pa = PTE2PA(*pte);
+    // printf("unmap phys address %p\n", pa);
     decrefcount((void*)pa);
     if(do_free){
       kfree((void*)pa);
@@ -384,17 +387,37 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
       return -1;
     if((*pte & PTE_U) == 0)
       return -1;
-    if (*pte & PTE_C && !(*pte & PTE_W)) {
-      // printf("copyout page fault\n");
-      pa0 = (uint64) pagekalloc();
-      // refcounts[(uint64) pa0 / PGSIZE]++;
-      memmove((void*) pa0, (void*) PTE2PA(*pte), PGSIZE);
-      // refcounts[PTE2PA(*pte) / PGSIZE]--;
-      decrefcount((void*) PTE2PA(*pte));
-      *pte = PA2PTE(pa0) | PTE_FLAGS(*pte) | PTE_W;
-    } else 
+    if (*pte & PTE_W) pa0 = PTE2PA(*pte);
+    else if ((*pte & PTE_C) == 0) return -1;
+    // if (*pte & PTE_C && !(*pte & PTE_W)) {
+    else {
+      acquire(&kmem.lock);
+      if (refcounts[(PTE2PA(*pte) - KERNBASE) / PGSIZE] > 1) {
+        // printf("copyout page fault\n");
+        // pa0 = (uint64) pagekalloc();
+        struct run *r;
+        r = kmem.freelist;
+        if (r) {
+          kmem.freelist = r->next;
+          memset((char*) r, 5, PGSIZE);
+        } else {
+          release(&kmem.lock);
+          return -1;
+        }
+        pa0 = (uint64) r;
+        refcounts[(pa0 - KERNBASE) / PGSIZE]++;
+        memmove((void*) pa0, (void*) PTE2PA(*pte), PGSIZE);
+        refcounts[(PTE2PA(*pte) - KERNBASE) / PGSIZE]--;
+        // decrefcount((void*) PTE2PA(*pte));
+        *pte = PA2PTE(pa0) | PTE_FLAGS(*pte) | PTE_W;
+      } else {
+        pa0 = PTE2PA(*pte);
+        *pte |= PTE_W;
+      }
+      release(&kmem.lock);
+    } // else 
       // pa0 = walkaddr(pagetable, va0);
-      pa0 = PTE2PA(*pte);
+      // pa0 = PTE2PA(*pte);
     /*
     if(pa0 == 0)
       return -1;

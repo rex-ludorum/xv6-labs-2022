@@ -10,6 +10,7 @@ struct spinlock;
 struct sleeplock;
 struct stat;
 struct superblock;
+struct kmemstruct;
 
 // bio.c
 void            binit(void);
@@ -67,9 +68,9 @@ void            kfree(void *);
 void*           pagekalloc(void);
 void            decrefcount(void *);
 void            increfcount(void *);
-void            pagekfree(void *);
 void            kinit(void);
-extern uint     refcounts[PHYSTOP / PGSIZE];
+extern uint     refcounts[(PHYSTOP - KERNBASE) / PGSIZE];
+extern struct kmemstruct kmem;
 
 // log.c
 void            initlog(int, struct superblock*);

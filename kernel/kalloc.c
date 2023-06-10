@@ -8,22 +8,22 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
+#include "kalloc.h"
 
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+/*
 struct run {
   struct run *next;
 };
+*/
 
-struct {
-  struct spinlock lock;
-  struct run *freelist;
-} kmem;
+uint refcounts[(PHYSTOP - KERNBASE) / PGSIZE];
 
-uint refcounts[PHYSTOP / PGSIZE];
+struct kmemstruct kmem;
 
 void
 kinit()
@@ -54,7 +54,7 @@ kfree(void *pa)
     panic("kfree");
 
   acquire(&kmem.lock);
-  if (refcounts[(uint64) pa / PGSIZE] == 0) {
+  if (refcounts[((uint64) pa - KERNBASE) / PGSIZE] == 0) {
     // Fill with junk to catch dangling refs.
     memset(pa, 1, PGSIZE);
 
@@ -62,42 +62,21 @@ kfree(void *pa)
 
     r->next = kmem.freelist;
     kmem.freelist = r;
-  }// else printf("nonzero kfree refs %d\n", refcounts[(uint64) pa / PGSIZE]);
+    // printf("kfree addr %p\n", pa);
+  } // else printf("nonzero kfree refs %d for addr %p\n", refcounts[(uint64) pa / PGSIZE], pa);
   release(&kmem.lock);
 }
 
 void increfcount(void *pa) {
   acquire(&kmem.lock);
-  refcounts[(uint64) pa / PGSIZE]++;
+  refcounts[((uint64) pa - KERNBASE) / PGSIZE]++;
   release(&kmem.lock);
 }
 
 void decrefcount(void *pa) {
   acquire(&kmem.lock);
-  if (refcounts[(uint64) pa / PGSIZE] > 0)
-    refcounts[(uint64) pa / PGSIZE]--;
-  release(&kmem.lock);
-}
-
-void
-pagekfree(void *pa)
-{
-  struct run *r;
-
-  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
-    panic("pagekfree");
-
-  acquire(&kmem.lock);
-  refcounts[(uint64) pa / PGSIZE]--;
-  if (refcounts[(uint64) pa / PGSIZE] == 0) {
-    // Fill with junk to catch dangling refs.
-    memset(pa, 1, PGSIZE);
-
-    r = (struct run*)pa;
-
-    r->next = kmem.freelist;
-    kmem.freelist = r;
-  }// else printf("nonzero pagekfree refs %d\n", refcounts[(uint64) pa / PGSIZE]);
+  if (refcounts[((uint64) pa - KERNBASE) / PGSIZE] > 0)
+    refcounts[((uint64) pa - KERNBASE) / PGSIZE]--;
   release(&kmem.lock);
 }
 
@@ -129,7 +108,7 @@ pagekalloc(void)
   r = kmem.freelist;
   if(r) {
     kmem.freelist = r->next;
-    refcounts[(uint64) r / PGSIZE]++;
+    refcounts[((uint64) r - KERNBASE) / PGSIZE]++;
   }
   release(&kmem.lock);
 

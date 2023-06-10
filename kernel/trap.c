@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "kalloc.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -71,35 +72,47 @@ usertrap(void)
     else if ((addr = walk(p->pagetable, r_stval(), 0)) != 0) {
       // printf("r_stval %p\n", r_stval());
       // printf("refs %d\n", refcounts[PTE2PA(*addr) / PGSIZE]);
+      acquire(&kmem.lock);
       if ((*addr & PTE_C) == 0) {
         setkilled(p);
-	// printf("non cow page\n");
-      } else if (refcounts[PTE2PA(*addr) / PGSIZE] > 1) {
-	// printf("cow page fault\n");
-        char *newmem = pagekalloc();
-	if (newmem == 0) {
+        // printf("non cow page\n");
+      } else if (refcounts[(PTE2PA(*addr) - KERNBASE) / PGSIZE] > 1) {
+        // printf("cow page fault %p\n", r_stval());
+        // char *newmem = pagekalloc();
+        struct run *r;
+        r = kmem.freelist;
+        if (r) {
+          kmem.freelist = r->next;
+          memset((char*) r, 5, PGSIZE);
+        }
+        char *newmem = (void*) r;
+
+        // printf("new mem %p\n", newmem);
+        if (newmem == 0) {
           setkilled(p);
-	  // printf("killed\n");
-	} else {
+          // printf("killed\n");
+        } else {
           memmove(newmem, (void*) PTE2PA(*addr), PGSIZE);
-          // refcounts[PTE2PA(*addr) / PGSIZE]--;
-	  decrefcount((void *) PTE2PA(*addr));
-          // refcounts[(uint64) newmem / PGSIZE]++;
+          refcounts[(PTE2PA(*addr) - KERNBASE) / PGSIZE]--;
+          // decrefcount((void *) PTE2PA(*addr));
+          refcounts[((uint64) newmem - KERNBASE) / PGSIZE]++;
           uint flags = PTE_FLAGS(*addr);
           // printf("PTE_C %d\n", flags & PTE_C);
           *addr = PA2PTE(newmem) | flags | PTE_W;
+          // printf("new mem va %p\n", PA2PTE(newmem));
         }
-	/*
+        /*
         uint64 nextva, va = 0;
         while ((nextva = walkaddr(p->pagetable, va)) != 0)
           va += PGSIZE;
-	 */
+         */
         // mappages(p->pagetable, nextva, 1, (uint64)newmem, flags);
         // uvmunmap(p->pagetable, r_stval(), 1, 0);
       } else {
-	// printf("no copy needed\n");
+        // printf("no copy needed\n");
         *addr |= PTE_W;
       }
+      release(&kmem.lock);
     }
   } else if((which_dev = devintr()) != 0){
     // ok
