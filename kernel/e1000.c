@@ -50,7 +50,7 @@ e1000_init(uint32 *xregs)
     panic("e1000");
   regs[E1000_TDLEN] = sizeof(tx_ring);
   regs[E1000_TDH] = regs[E1000_TDT] = 0;
-  
+ 
   // [E1000 14.4] Receive initialization
   memset(rx_ring, 0, sizeof(rx_ring));
   for (i = 0; i < RX_RING_SIZE; i++) {
@@ -85,7 +85,7 @@ e1000_init(uint32 *xregs)
     E1000_RCTL_BAM |                 // enable broadcast
     E1000_RCTL_SZ_2048 |             // 2048-byte rx buffers
     E1000_RCTL_SECRC;                // strip CRC
-  
+ 
   // ask e1000 for receive interrupts.
   regs[E1000_RDTR] = 0; // interrupt after every received packet (no timer)
   regs[E1000_RADV] = 0; // interrupt after every packet (no timer)
@@ -102,7 +102,26 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  
+  struct tx_desc tdt = tx_ring[regs[E1000_TDT]];
+  if (!(tdt.status & E1000_TXD_STAT_DD)) {
+    return -1;
+  }
+  uint64 addr = tdt.addr;
+  printf("tx\n");
+  acquire(&e1000_lock);
+  printf("tx1\n");
+  if (addr) mbuffree(tx_mbufs[regs[E1000_TDT]]);
+  tx_mbufs[regs[E1000_TDT]] = m;
+  tx_ring[regs[E1000_TDT]].addr = (uint64) m->head;
+  tx_ring[regs[E1000_TDT]].length = m->len;
+  tx_ring[regs[E1000_TDT]].cmd |= E1000_TXD_CMD_EOP;
+  tx_ring[regs[E1000_TDT]].cmd |= E1000_TXD_CMD_RS;
+  regs[E1000_TDT]++;
+  regs[E1000_TDT] %= TX_RING_SIZE;
+  // mbuffree(m);
+  release(&e1000_lock);
+  printf("tx2\n");
+
   return 0;
 }
 
@@ -115,6 +134,22 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  struct rx_desc rdt = rx_ring[(regs[E1000_RDT] + 1) % RX_RING_SIZE];
+  if (!(rdt.status & E1000_RXD_STAT_DD)) return;
+  printf("recv\n");
+  acquire(&e1000_lock);
+  printf("recv1\n");
+  struct mbuf *recmbuf = rx_mbufs[(regs[E1000_RDT] + 1) % RX_RING_SIZE];
+  recmbuf->len = rdt.length;
+  net_rx(recmbuf);
+  struct mbuf *newmbuf = mbufalloc(MBUF_DEFAULT_HEADROOM);
+  rx_mbufs[(regs[E1000_RDT] + 1) % RX_RING_SIZE] = newmbuf;
+  rx_ring[(regs[E1000_RDT] + 1) % RX_RING_SIZE].addr = (uint64) newmbuf->head;
+  rx_ring[(regs[E1000_RDT] + 1) % RX_RING_SIZE].status = 0;
+  regs[E1000_RDT]++;
+  regs[E1000_RDT] %= RX_RING_SIZE;
+  release(&e1000_lock);
+  printf("recv2\n");
 }
 
 void
@@ -125,5 +160,6 @@ e1000_intr(void)
   // further interrupts.
   regs[E1000_ICR] = 0xffffffff;
 
+  printf("intr\n");
   e1000_recv();
 }
