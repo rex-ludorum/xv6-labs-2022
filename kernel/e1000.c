@@ -19,7 +19,7 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
-struct spinlock e1000_lock;
+struct spinlock e1000_lock_tr, e1000_lock_rec;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -29,7 +29,8 @@ e1000_init(uint32 *xregs)
 {
   int i;
 
-  initlock(&e1000_lock, "e1000");
+  initlock(&e1000_lock_tr, "e1000 tr");
+  initlock(&e1000_lock_rec, "e1000 rec");
 
   regs = xregs;
 
@@ -102,10 +103,10 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  acquire(&e1000_lock);
+  acquire(&e1000_lock_tr);
   struct tx_desc *tdt = &tx_ring[regs[E1000_TDT]];
   if (!(tdt->status & E1000_TXD_STAT_DD)) {
-    release(&e1000_lock);
+    release(&e1000_lock_tr);
     return -1;
   }
   if (tdt->addr) mbuffree(tx_mbufs[regs[E1000_TDT]]);
@@ -115,7 +116,7 @@ e1000_transmit(struct mbuf *m)
   tdt->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
   regs[E1000_TDT]++;
   regs[E1000_TDT] %= TX_RING_SIZE;
-  release(&e1000_lock);
+  release(&e1000_lock_tr);
 
   return 0;
 }
@@ -129,15 +130,15 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
-  acquire(&e1000_lock);
+  acquire(&e1000_lock_rec);
   int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
   struct rx_desc *rdt = &rx_ring[idx];
   while (rdt->status & E1000_RXD_STAT_DD) {
     struct mbuf *recmbuf = rx_mbufs[idx];
     recmbuf->len = rdt->length;
-    release(&e1000_lock);
+    release(&e1000_lock_rec);
     net_rx(recmbuf);
-    acquire(&e1000_lock);
+    acquire(&e1000_lock_rec);
     regs[E1000_RDT]++;
     regs[E1000_RDT] %= RX_RING_SIZE;
     rdt->status = 0;
@@ -145,14 +146,14 @@ e1000_recv(void)
     rx_mbufs[idx] = newmbuf;
     if (!newmbuf) {
       rdt->addr = 0;
-      release(&e1000_lock);
+      release(&e1000_lock_rec);
       return;
     }
     rdt->addr = (uint64) newmbuf->head;
     idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
     rdt = &rx_ring[idx];
   }
-  release(&e1000_lock);
+  release(&e1000_lock_rec);
 }
 
 void
