@@ -102,25 +102,20 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  struct tx_desc tdt = tx_ring[regs[E1000_TDT]];
-  if (!(tdt.status & E1000_TXD_STAT_DD)) {
+  acquire(&e1000_lock);
+  struct tx_desc *tdt = &tx_ring[regs[E1000_TDT]];
+  if (!(tdt->status & E1000_TXD_STAT_DD)) {
+    release(&e1000_lock);
     return -1;
   }
-  uint64 addr = tdt.addr;
-  printf("tx\n");
-  acquire(&e1000_lock);
-  printf("tx1\n");
-  if (addr) mbuffree(tx_mbufs[regs[E1000_TDT]]);
+  if (tdt->addr) mbuffree(tx_mbufs[regs[E1000_TDT]]);
   tx_mbufs[regs[E1000_TDT]] = m;
-  tx_ring[regs[E1000_TDT]].addr = (uint64) m->head;
-  tx_ring[regs[E1000_TDT]].length = m->len;
-  tx_ring[regs[E1000_TDT]].cmd |= E1000_TXD_CMD_EOP;
-  tx_ring[regs[E1000_TDT]].cmd |= E1000_TXD_CMD_RS;
+  tdt->addr = (uint64) m->head;
+  tdt->length = m->len;
+  tdt->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
   regs[E1000_TDT]++;
   regs[E1000_TDT] %= TX_RING_SIZE;
-  // mbuffree(m);
   release(&e1000_lock);
-  printf("tx2\n");
 
   return 0;
 }
@@ -134,22 +129,30 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
-  struct rx_desc rdt = rx_ring[(regs[E1000_RDT] + 1) % RX_RING_SIZE];
-  if (!(rdt.status & E1000_RXD_STAT_DD)) return;
-  printf("recv\n");
   acquire(&e1000_lock);
-  printf("recv1\n");
-  struct mbuf *recmbuf = rx_mbufs[(regs[E1000_RDT] + 1) % RX_RING_SIZE];
-  recmbuf->len = rdt.length;
-  net_rx(recmbuf);
-  struct mbuf *newmbuf = mbufalloc(MBUF_DEFAULT_HEADROOM);
-  rx_mbufs[(regs[E1000_RDT] + 1) % RX_RING_SIZE] = newmbuf;
-  rx_ring[(regs[E1000_RDT] + 1) % RX_RING_SIZE].addr = (uint64) newmbuf->head;
-  rx_ring[(regs[E1000_RDT] + 1) % RX_RING_SIZE].status = 0;
-  regs[E1000_RDT]++;
-  regs[E1000_RDT] %= RX_RING_SIZE;
+  int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  struct rx_desc *rdt = &rx_ring[idx];
+  while (rdt->status & E1000_RXD_STAT_DD) {
+    struct mbuf *recmbuf = rx_mbufs[idx];
+    recmbuf->len = rdt->length;
+    release(&e1000_lock);
+    net_rx(recmbuf);
+    acquire(&e1000_lock);
+    regs[E1000_RDT]++;
+    regs[E1000_RDT] %= RX_RING_SIZE;
+    rdt->status = 0;
+    struct mbuf *newmbuf = mbufalloc(0);
+    rx_mbufs[idx] = newmbuf;
+    if (!newmbuf) {
+      rdt->addr = 0;
+      release(&e1000_lock);
+      return;
+    }
+    rdt->addr = (uint64) newmbuf->head;
+    idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+    rdt = &rx_ring[idx];
+  }
   release(&e1000_lock);
-  printf("recv2\n");
 }
 
 void
@@ -160,6 +163,6 @@ e1000_intr(void)
   // further interrupts.
   regs[E1000_ICR] = 0xffffffff;
 
-  printf("intr\n");
+  // printf("intr\n");
   e1000_recv();
 }
