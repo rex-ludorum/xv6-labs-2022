@@ -130,25 +130,14 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  acquire(&e1000_lock_rec);
   int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
   struct rx_desc *rdt = &rx_ring[idx];
-  int end = regs[E1000_RDH];
-  if (end < idx) {
-    end += RX_RING_SIZE;
-  }
-  for (int i = idx; i < end; i++) {
-    if (rx_ring[i % RX_RING_SIZE].status & E1000_RXD_STAT_DD) {
-      idx = i % RX_RING_SIZE;
-      rdt = &rx_ring[idx];
-      break;
-    }
-  }
-  acquire(&e1000_lock_rec);
+
   while (rdt->status & E1000_RXD_STAT_DD) {
     struct mbuf *recmbuf = rx_mbufs[idx];
     recmbuf->len = rdt->length;
     net_rx(recmbuf);
-    regs[E1000_RDT] = idx;
     rdt->status = 0;
     struct mbuf *newmbuf = mbufalloc(0);
     rx_mbufs[idx] = newmbuf;
@@ -158,6 +147,7 @@ e1000_recv(void)
       return;
     }
     rdt->addr = (uint64) newmbuf->head;
+    regs[E1000_RDT] = idx;
     idx = (idx + 1) % RX_RING_SIZE;
     rdt = &rx_ring[idx];
   }
