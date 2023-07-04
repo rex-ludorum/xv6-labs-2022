@@ -110,12 +110,12 @@ e1000_transmit(struct mbuf *m)
     return -1;
   }
   if (tdt->addr) mbuffree(tx_mbufs[regs[E1000_TDT]]);
+  memset(tdt, 0, sizeof(struct tx_desc));
   tx_mbufs[regs[E1000_TDT]] = m;
   tdt->addr = (uint64) m->head;
   tdt->length = m->len;
   tdt->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
-  regs[E1000_TDT]++;
-  regs[E1000_TDT] %= TX_RING_SIZE;
+  regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
   release(&e1000_lock_tr);
 
   return 0;
@@ -138,15 +138,12 @@ e1000_recv(void)
     struct mbuf *recmbuf = rx_mbufs[idx];
     recmbuf->len = rdt->length;
     net_rx(recmbuf);
-    rdt->status = 0;
-    struct mbuf *newmbuf = mbufalloc(0);
-    rx_mbufs[idx] = newmbuf;
-    if (!newmbuf) {
-      rdt->addr = 0;
-      release(&e1000_lock_rec);
-      return;
+    rx_mbufs[idx] = mbufalloc(0);
+    if (!rx_mbufs[idx]) {
+      panic("e1000");
     }
-    rdt->addr = (uint64) newmbuf->head;
+    memset(rdt, 0, sizeof(struct rx_desc));
+    rdt->addr = (uint64) rx_mbufs[idx]->head;
     regs[E1000_RDT] = idx;
     idx = (idx + 1) % RX_RING_SIZE;
     rdt = &rx_ring[idx];
